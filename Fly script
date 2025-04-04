@@ -1,0 +1,123 @@
+-- Fly Script (save this as fly_script.lua)
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Create ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FlyGui"
+screenGui.Parent = game:GetService("CoreGui")
+
+-- Create main frame
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 100)
+frame.Position = UDim2.new(1, -210, 0, 10) -- Top right corner
+frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
+
+-- Create title
+local title = Instance.new("TextLabel")
+title.Text = "Fly Controls"
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 18
+title.Parent = frame
+
+-- Create Fly button
+local flyButton = Instance.new("TextButton")
+flyButton.Text = "FLY"
+flyButton.Size = UDim2.new(0.9, 0, 0, 30)
+flyButton.Position = UDim2.new(0.05, 0, 0, 40)
+flyButton.BackgroundColor3 = Color3.fromRGB(70, 70, 200)
+flyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+flyButton.Font = Enum.Font.SourceSansBold
+flyButton.TextSize = 16
+flyButton.Parent = frame
+
+-- Create Unfly button
+local unflyButton = Instance.new("TextButton")
+unflyButton.Text = "UNFLY"
+unflyButton.Size = UDim2.new(0.9, 0, 0, 30)
+unflyButton.Position = UDim2.new(0.05, 0, 0, 75)
+unflyButton.BackgroundColor3 = Color3.fromRGB(200, 70, 70)
+unflyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+unflyButton.Font = Enum.Font.SourceSansBold
+unflyButton.TextSize = 16
+unflyButton.Parent = frame
+
+-- Fly variables
+local flying = false
+local flySpeed = 50
+local bodyVelocity
+
+-- Fly function
+local function enableFly()
+    if flying or humanoid:GetState() == Enum.HumanoidStateType.Dead then return end
+    
+    flying = true
+    humanoid.PlatformStand = true
+    
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = Vector3.new(0, 0.1, 0) -- Small upward force to start
+    bodyVelocity.MaxForce = Vector3.new(10000, 10000, 10000)
+    bodyVelocity.Parent = character:FindFirstChild("HumanoidRootPart")
+    
+    flyButton.BackgroundColor3 = Color3.fromRGB(70, 200, 70)
+    flyButton.Text = "FLYING"
+end
+
+-- Unfly function
+local function disableFly()
+    if not flying then return end
+    
+    flying = false
+    humanoid.PlatformStand = false
+    
+    if bodyVelocity then
+        bodyVelocity:Destroy()
+        bodyVelocity = nil
+    end
+    
+    flyButton.BackgroundColor3 = Color3.fromRGB(70, 70, 200)
+    flyButton.Text = "FLY"
+end
+
+-- Button connections
+flyButton.MouseButton1Click:Connect(enableFly)
+unflyButton.MouseButton1Click:Connect(disableFly)
+
+-- Fly controls
+local function updateVelocity()
+    if not flying or not bodyVelocity then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local forward = UIS:IsKeyDown(Enum.KeyCode.W) and 1 or UIS:IsKeyDown(Enum.KeyCode.S) and -1 or 0
+    local right = UIS:IsKeyDown(Enum.KeyCode.D) and 1 or UIS:IsKeyDown(Enum.KeyCode.A) and -1 or 0
+    local up = UIS:IsKeyDown(Enum.KeyCode.Space) and 1 or UIS:IsKeyDown(Enum.KeyCode.LeftShift) and -1 or 0
+    
+    local look = rootPart.CFrame.LookVector
+    local rightVector = rootPart.CFrame.RightVector
+    
+    bodyVelocity.Velocity = (look * forward + rightVector * right) * flySpeed + Vector3.new(0, up * flySpeed, 0)
+end
+
+game:GetService("RunService").Heartbeat:Connect(updateVelocity)
+
+-- Character handling
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    disableFly()
+    
+    humanoid.Died:Connect(disableFly)
+end)
+
+return "Fly script loaded successfully!"
