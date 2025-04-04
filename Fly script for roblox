@@ -1,0 +1,173 @@
+-- Robust Fly Script (save as fly_script.lua)
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local function safeWaitForChild(instance, childName, timeout)
+    timeout = timeout or 5
+    local start = tick()
+    while tick() - start < timeout do
+        if instance:FindFirstChild(childName) then
+            return instance[childName]
+        end
+        RunService.Heartbeat:Wait()
+    end
+    return nil
+end
+
+local player = Players.LocalPlayer
+if not player then
+    return "Player not found!"
+end
+
+-- Wait for character safely
+local character = player.Character
+if not character then
+    local success
+    success, character = pcall(function()
+        return player.CharacterAdded:Wait()
+    end)
+    if not success then
+        return "Failed to get character!"
+    end
+end
+
+local humanoid = safeWaitForChild(character, "Humanoid")
+if not humanoid then
+    return "Humanoid not found!"
+end
+
+-- Create GUI safely
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FlyGui_V2"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 100)
+frame.Position = UDim2.new(1, -210, 0, 10)
+frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+frame.BorderSizePixel = 0
+
+local title = Instance.new("TextLabel")
+title.Text = "Fly Controls V2"
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 18
+
+local flyButton = Instance.new("TextButton")
+flyButton.Text = "FLY"
+flyButton.Size = UDim2.new(0.9, 0, 0, 30)
+flyButton.Position = UDim2.new(0.05, 0, 0, 40)
+flyButton.BackgroundColor3 = Color3.fromRGB(70, 70, 200)
+flyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+flyButton.Font = Enum.Font.SourceSansBold
+flyButton.TextSize = 16
+
+local unflyButton = Instance.new("TextButton")
+unflyButton.Text = "UNFLY"
+unflyButton.Size = UDim2.new(0.9, 0, 0, 30)
+unflyButton.Position = UDim2.new(0.05, 0, 0, 75)
+unflyButton.BackgroundColor3 = Color3.fromRGB(200, 70, 70)
+unflyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+unflyButton.Font = Enum.Font.SourceSansBold
+unflyButton.TextSize = 16
+
+-- Build GUI hierarchy
+title.Parent = frame
+flyButton.Parent = frame
+unflyButton.Parent = frame
+frame.Parent = screenGui
+
+-- Parent GUI last to prevent flashes
+if pcall(function()
+    screenGui.Parent = game:GetService("CoreGui") or game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+end) then
+    -- GUI created successfully
+else
+    return "Failed to create GUI!"
+end
+
+-- Fly system
+local flying = false
+local flySpeed = 50
+local bodyVelocity
+local connections = {}
+
+local function cleanUp()
+    flying = false
+    if bodyVelocity then
+        bodyVelocity:Destroy()
+        bodyVelocity = nil
+    end
+    if humanoid then
+        humanoid.PlatformStand = false
+    end
+    flyButton.BackgroundColor3 = Color3.fromRGB(70, 70, 200)
+    flyButton.Text = "FLY"
+end
+
+local function enableFly()
+    if flying or humanoid:GetState() == Enum.HumanoidStateType.Dead then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    flying = true
+    humanoid.PlatformStand = true
+    
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = Vector3.new(0, 0.1, 0)
+    bodyVelocity.MaxForce = Vector3.new(10000, 10000, 10000)
+    bodyVelocity.P = 1250
+    bodyVelocity.Parent = rootPart
+    
+    flyButton.BackgroundColor3 = Color3.fromRGB(70, 200, 70)
+    flyButton.Text = "FLYING"
+end
+
+local function updateVelocity()
+    if not flying or not bodyVelocity then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return cleanUp() end
+    
+    local forward = UIS:IsKeyDown(Enum.KeyCode.W) and 1 or UIS:IsKeyDown(Enum.KeyCode.S) and -1 or 0
+    local right = UIS:IsKeyDown(Enum.KeyCode.D) and 1 or UIS:IsKeyDown(Enum.KeyCode.A) and -1 or 0
+    local up = UIS:IsKeyDown(Enum.KeyCode.Space) and 1 or UIS:IsKeyDown(Enum.KeyCode.LeftShift) and -1 or 0
+    
+    local look = rootPart.CFrame.LookVector
+    local rightVector = rootPart.CFrame.RightVector
+    
+    bodyVelocity.Velocity = (look * forward + rightVector * right) * flySpeed + Vector3.new(0, up * flySpeed, 0)
+end
+
+-- Connect controls
+table.insert(connections, flyButton.MouseButton1Click:Connect(enableFly))
+table.insert(connections, unflyButton.MouseButton1Click:Connect(cleanUp))
+table.insert(connections, RunService.Heartbeat:Connect(updateVelocity))
+
+-- Character handling
+table.insert(connections, player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = safeWaitForChild(character, "Humanoid") or humanoid
+    cleanUp()
+    
+    if humanoid then
+        table.insert(connections, humanoid.Died:Connect(cleanUp))
+    end
+end))
+
+-- Cleanup when script ends
+table.insert(connections, game:GetService("UserInputService").WindowFocusReleased:Connect(function()
+    cleanUp()
+end))
+
+return "Fly script loaded successfully! Controls: W/A/S/D + Space/Shift"
