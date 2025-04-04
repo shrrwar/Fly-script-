@@ -1,24 +1,49 @@
--- Fly Script (save this as fly_script.lua)
+-- Smooth Controllable Fly Script with Joystick Support
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local GuiService = game:GetService("GuiService")
+local ContextActionService = game:GetService("ContextActionService")
+
+-- Configuration
+local FLY_SPEED = 50
+local FLY_ACCELERATION = 1.5
+local TURN_SMOOTHNESS = 0.15
+
+-- Player setup
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
--- Create ScreenGui
+-- Flying state
+local flying = false
+local flyVelocity = Vector3.new()
+local currentSpeed = 0
+local bodyGyro, bodyVelocity
+local connections = {}
+
+-- Mobile detection
+local isMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
+local touchControlsFrame
+local virtualJoystick
+
+-- Create GUI
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FlyGui"
-screenGui.Parent = game:GetService("CoreGui")
+screenGui.Name = "FlyGui_Controlled"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Create main frame
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 200, 0, 100)
-frame.Position = UDim2.new(1, -210, 0, 10) -- Top right corner
-frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 200, 0, 100)
+mainFrame.Position = UDim2.new(1, -210, 0, 10)
+mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+mainFrame.BorderSizePixel = 0
 
--- Create title
 local title = Instance.new("TextLabel")
 title.Text = "Fly Controls"
 title.Size = UDim2.new(1, 0, 0, 30)
@@ -27,9 +52,7 @@ title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.Font = Enum.Font.SourceSansBold
 title.TextSize = 18
-title.Parent = frame
 
--- Create Fly button
 local flyButton = Instance.new("TextButton")
 flyButton.Text = "FLY"
 flyButton.Size = UDim2.new(0.9, 0, 0, 30)
@@ -38,9 +61,7 @@ flyButton.BackgroundColor3 = Color3.fromRGB(70, 70, 200)
 flyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 flyButton.Font = Enum.Font.SourceSansBold
 flyButton.TextSize = 16
-flyButton.Parent = frame
 
--- Create Unfly button
 local unflyButton = Instance.new("TextButton")
 unflyButton.Text = "UNFLY"
 unflyButton.Size = UDim2.new(0.9, 0, 0, 30)
@@ -49,75 +70,224 @@ unflyButton.BackgroundColor3 = Color3.fromRGB(200, 70, 70)
 unflyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 unflyButton.Font = Enum.Font.SourceSansBold
 unflyButton.TextSize = 16
-unflyButton.Parent = frame
 
--- Fly variables
-local flying = false
-local flySpeed = 50
-local bodyVelocity
+-- Build GUI
+title.Parent = mainFrame
+flyButton.Parent = mainFrame
+unflyButton.Parent = mainFrame
+mainFrame.Parent = screenGui
 
--- Fly function
-local function enableFly()
-    if flying or humanoid:GetState() == Enum.HumanoidStateType.Dead then return end
+-- Mobile controls
+if isMobile then
+    touchControlsFrame = Instance.new("Frame")
+    touchControlsFrame.Size = UDim2.new(1, 0, 1, 0)
+    touchControlsFrame.BackgroundTransparency = 1
+    touchControlsFrame.Parent = screenGui
     
-    flying = true
-    humanoid.PlatformStand = true
+    -- Virtual joystick
+    virtualJoystick = Instance.new("ImageButton")
+    virtualJoystick.Name = "VirtualJoystick"
+    virtualJoystick.Size = UDim2.new(0, 100, 0, 100)
+    virtualJoystick.Position = UDim2.new(0, 50, 1, -150)
+    virtualJoystick.AnchorPoint = Vector2.new(0, 1)
+    virtualJoystick.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    virtualJoystick.BackgroundTransparency = 0.7
+    virtualJoystick.Image = "rbxassetid://3570695787"
+    virtualJoystick.ScaleType = Enum.ScaleType.Slice
+    virtualJoystick.SliceCenter = Rect.new(100, 100, 100, 100)
+    virtualJoystick.Parent = touchControlsFrame
     
-    bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.Velocity = Vector3.new(0, 0.1, 0) -- Small upward force to start
-    bodyVelocity.MaxForce = Vector3.new(10000, 10000, 10000)
-    bodyVelocity.Parent = character:FindFirstChild("HumanoidRootPart")
-    
-    flyButton.BackgroundColor3 = Color3.fromRGB(70, 200, 70)
-    flyButton.Text = "FLYING"
+    local joystickKnob = Instance.new("Frame")
+    joystickKnob.Name = "Knob"
+    joystickKnob.Size = UDim2.new(0, 40, 0, 40)
+    joystickKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+    joystickKnob.Position = UDim2.new(0.5, 0, 0.5, 0)
+    joystickKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    joystickKnob.BackgroundTransparency = 0.5
+    joystickKnob.BorderSizePixel = 0
+    joystickKnob.Parent = virtualJoystick
 end
 
--- Unfly function
-local function disableFly()
-    if not flying then return end
-    
+-- Parent GUI safely
+screenGui.Parent = game:GetService("CoreGui") or player:WaitForChild("PlayerGui")
+
+-- Cleanup function
+local function cleanUp()
     flying = false
-    humanoid.PlatformStand = false
+    currentSpeed = 0
+    
+    if bodyGyro then
+        bodyGyro:Destroy()
+        bodyGyro = nil
+    end
     
     if bodyVelocity then
         bodyVelocity:Destroy()
         bodyVelocity = nil
     end
     
+    if humanoid then
+        humanoid.PlatformStand = false
+    end
+    
     flyButton.BackgroundColor3 = Color3.fromRGB(70, 70, 200)
     flyButton.Text = "FLY"
+    
+    -- Disable mobile controls
+    if isMobile and touchControlsFrame then
+        touchControlsFrame.Visible = false
+    end
 end
 
--- Button connections
-flyButton.MouseButton1Click:Connect(enableFly)
-unflyButton.MouseButton1Click:Connect(disableFly)
+-- Enable flying
+local function enableFly()
+    if flying or humanoid:GetState() == Enum.HumanoidStateType.Dead then return end
+    
+    flying = true
+    humanoid.PlatformStand = true
+    
+    -- Create physics controllers
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.MaxTorque = Vector3.new(10000, 10000, 10000)
+    bodyGyro.P = 1000
+    bodyGyro.D = 50
+    bodyGyro.Parent = rootPart
+    
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(10000, 10000, 10000)
+    bodyVelocity.P = 1000
+    bodyVelocity.Parent = rootPart
+    
+    flyButton.BackgroundColor3 = Color3.fromRGB(70, 200, 70)
+    flyButton.Text = "FLYING"
+    
+    -- Enable mobile controls
+    if isMobile and touchControlsFrame then
+        touchControlsFrame.Visible = true
+    end
+end
 
--- Fly controls
-local function updateVelocity()
-    if not flying or not bodyVelocity then return end
+-- Handle keyboard input
+local function handleKeyboard(input, gameProcessed)
+    if not flying or gameProcessed then return end
     
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
+    if input.KeyCode == Enum.KeyCode.Space then
+        flyVelocity = Vector3.new(flyVelocity.X, FLY_SPEED, flyVelocity.Z)
+    elseif input.KeyCode == Enum.KeyCode.LeftShift then
+        flyVelocity = Vector3.new(flyVelocity.X, -FLY_SPEED, flyVelocity.Z)
+    end
+end
+
+-- Handle mobile joystick
+local joystickActive = false
+local joystickPosition = Vector2.new()
+local joystickStartPos = Vector2.new()
+local joystickDirection = Vector2.new()
+
+if isMobile then
+    virtualJoystick.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            joystickActive = true
+            joystickStartPos = Vector2.new(input.Position.X, input.Position.Y)
+        end
+    end)
     
+    virtualJoystick.InputChanged:Connect(function(input)
+        if joystickActive and input.UserInputType == Enum.UserInputType.Touch then
+            local currentPos = Vector2.new(input.Position.X, input.Position.Y)
+            joystickDirection = (currentPos - joystickStartPos) / 50
+            joystickDirection = Vector2.new(
+                math.clamp(joystickDirection.X, -1, 1),
+                math.clamp(joystickDirection.Y, -1, 1)
+            )
+            
+            -- Move joystick knob
+            local knob = virtualJoystick:FindFirstChild("Knob")
+            if knob then
+                knob.Position = UDim2.new(0.5, joystickDirection.X * 30, 0.5, joystickDirection.Y * 30)
+            end
+        end
+    end)
+    
+    virtualJoystick.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            joystickActive = false
+            joystickDirection = Vector2.new()
+            
+            -- Reset joystick knob
+            local knob = virtualJoystick:FindFirstChild("Knob")
+            if knob then
+                knob.Position = UDim2.new(0.5, 0, 0.5, 0)
+            end
+        end
+    end)
+end
+
+-- Main flight control function
+local function updateFlight(delta)
+    if not flying or not bodyGyro or not bodyVelocity then return end
+    
+    -- Keyboard controls
     local forward = UIS:IsKeyDown(Enum.KeyCode.W) and 1 or UIS:IsKeyDown(Enum.KeyCode.S) and -1 or 0
     local right = UIS:IsKeyDown(Enum.KeyCode.D) and 1 or UIS:IsKeyDown(Enum.KeyCode.A) and -1 or 0
-    local up = UIS:IsKeyDown(Enum.KeyCode.Space) and 1 or UIS:IsKeyDown(Enum.KeyCode.LeftShift) and -1 or 0
     
-    local look = rootPart.CFrame.LookVector
-    local rightVector = rootPart.CFrame.RightVector
+    -- Mobile joystick controls override keyboard
+    if isMobile and joystickActive then
+        forward = -joystickDirection.Y
+        right = joystickDirection.X
+    end
     
-    bodyVelocity.Velocity = (look * forward + rightVector * right) * flySpeed + Vector3.new(0, up * flySpeed, 0)
+    -- Calculate desired velocity
+    local camera = workspace.CurrentCamera
+    local lookVector = camera.CFrame.LookVector
+    local rightVector = camera.CFrame.RightVector
+    
+    local desiredVelocity = (lookVector * forward + rightVector * right) * FLY_SPEED
+    desiredVelocity = desiredVelocity + Vector3.new(0, flyVelocity.Y, 0)
+    
+    -- Smooth acceleration
+    currentSpeed = math.min(currentSpeed + FLY_ACCELERATION * delta, FLY_SPEED)
+    local currentVelocity = bodyVelocity.Velocity
+    local newVelocity = currentVelocity:Lerp(desiredVelocity, TURN_SMOOTHNESS)
+    
+    -- Apply movement
+    bodyVelocity.Velocity = newVelocity
+    
+    -- Smooth rotation (only for keyboard)
+    if not isMobile or not joystickActive then
+        if forward ~= 0 or right ~= 0 then
+            local targetCFrame = CFrame.new(Vector3.new(), lookVector * forward + rightVector * right)
+            bodyGyro.CFrame = bodyGyro.CFrame:Lerp(targetCFrame, TURN_SMOOTHNESS)
+        else
+            bodyGyro.CFrame = CFrame.new()
+        end
+    else
+        bodyGyro.CFrame = CFrame.new()
+    end
+    
+    -- Reset vertical velocity if no input
+    if not UIS:IsKeyDown(Enum.KeyCode.Space) and not UIS:IsKeyDown(Enum.KeyCode.LeftShift) then
+        flyVelocity = Vector3.new(flyVelocity.X, 0, flyVelocity.Z)
+    end
 end
 
-game:GetService("RunService").Heartbeat:Connect(updateVelocity)
+-- Connect controls
+table.insert(connections, flyButton.MouseButton1Click:Connect(enableFly))
+table.insert(connections, unflyButton.MouseButton1Click:Connect(cleanUp))
+table.insert(connections, UIS.InputBegan:Connect(handleKeyboard))
+table.insert(connections, RunService.Heartbeat:Connect(updateFlight))
 
 -- Character handling
-player.CharacterAdded:Connect(function(newCharacter)
+table.insert(connections, player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
     humanoid = character:WaitForChild("Humanoid")
-    disableFly()
+    rootPart = character:WaitForChild("HumanoidRootPart")
+    cleanUp()
     
-    humanoid.Died:Connect(disableFly)
-end)
+    table.insert(connections, humanoid.Died:Connect(cleanUp))
+end))
 
-return "Fly script loaded successfully!"
+-- Cleanup on script end
+table.insert(connections, game:GetService("UserInputService").WindowFocusReleased:Connect(cleanUp))
+
+return "Fly script loaded! Controls: WASD + Space/Shift (Keyboard) or Joystick (Mobile)"
